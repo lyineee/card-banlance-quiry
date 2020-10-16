@@ -1,22 +1,112 @@
 import base64
 import json
+import logging
 import os
 import time
+from json.decoder import JSONDecodeError
 
 import cv2
-import numpy as np
 import requests as rq
-import logging
-from dotenv import load_dotenv
 from redis import StrictRedis
 
-# import tensorflow as tf
-load_dotenv()
-client_id = os.getenv("CLIENT_ID")
-client_secret = os.getenv("CLIENT_SECRET")
 logger = logging.getLogger(__file__)
-logging.basicConfig(level=logging.INFO)
-logger.setLevel(logging.DEBUG)
+
+
+class CardBanlanceQuiry(object):
+
+    banlance_url = "http://ecardfw.upc.edu.cn:20086/User/GetCardInfoByAccountNoParm"
+    history_url = "http://ecardfw.upc.edu.cn:20086/Report/GetMyBill"
+    today = None
+    banlance = None
+    cookies = dict()
+
+    def __init__(self, student_id, password, card_no):
+        self.student_id = student_id
+        self.password = password
+        self.card_no = card_no
+        # Connect to redis
+        self.redis = StrictRedis(
+            host=os.getenv("REDIS_HOST"), port=os.getenv("REDIS_PORT"), db=0
+        )
+        # Init obj
+        self.account = Login(self.student_id, self.password)
+
+    def date(self):
+        return time.strftime("%Y-%m-%d", time.localtime())
+
+    def quiry_banlance(self, retry=3):
+        ticket = self.get_ticket()
+        try:
+            for _ in range(retry):
+                res = rq.post(
+                    self.banlance_url,
+                    cookies={"hallticket": ticket},
+                    data={"json": "ture"},
+                )
+                quiry_json = json.loads(res.json()["Msg"])
+                if not res.json()["IsSucceed"]:
+                    self.banlance = (
+                        int(quiry_json["query_card"]["card"][0]["db_balance"]) / 100
+                    )
+                    break
+                else:
+                    logger.info("Hallticket outdated, try to refresh")
+                    ticket = self.get_ticket(refresh=True)
+        except Exception as e:
+            logger.warning("quiry banlance error, msg: {}".format(e))
+            raise
+
+        return self.banlance
+
+    def quiry_today(self, retry=3):
+        ticket = self.get_ticket()
+        today = 0
+        for _ in range(retry):
+            try:
+
+                res = rq.post(
+                    self.history_url,
+                    cookies={"hallticket": ticket},
+                    data={
+                        "sdate": self.date(),
+                        "edate": self.date(),
+                        "account": self.card_no,
+                    },
+                )
+                for i in res.json()["rows"]:
+                    val = i["TRANAMT"]
+                    if val < 0:
+                        today += val
+                break
+            except JSONDecodeError:
+                # raise ConnectionRefusedError
+                ticket = self.get_ticket(refresh=True)
+            except Exception as e:
+                logger.warning("quiry history error, msg: {}".format(e))
+                ticket = self.get_ticket(refresh=True)
+                # raise
+        return today
+
+    def get_ticket(self, refresh=False):
+        if not refresh:
+            ticket = self.redis.hmget(self.student_id, "hallticket")[0]
+            if ticket:
+                ticket = ticket.decode()
+                logger.debug("Get cache hallticket {}".format(ticket))
+            else:
+                ticket = self.account.get_cookies()
+        else:
+            ticket = self.account.get_cookies()
+        return ticket
+
+    def redis_update(self):
+        balance = self.quiry_banlance()
+        today = self.quiry_today()
+        timestamp = int(time.time())
+        self.redis.hmset(
+            self.student_id,
+            {"banlance": balance, "today": today, "timestamp": timestamp},
+        )
 
 
 def ocr(img_b64, access_token):
@@ -65,16 +155,6 @@ class Login(object):
             logger.error("Redis env error, msg:  {}".format(e))
             raise
 
-        # load keras model
-        # print("start loading keras model...")
-        # try:
-        #     self.model = tf.keras.models.load_model("./result.h5")
-        # except Exception as e:
-        #     # raise Exception('error when load model')
-        #     print("error when load model")
-        #     raise
-        # print("successfully load keras model")
-
     def _get_cookies(self):
         try:
             resp = rq.get("http://ecardfw.upc.edu.cn:20086/")
@@ -107,32 +187,12 @@ class Login(object):
     def _get_validate_code_ocr(self, validate_img) -> str:
         img_bytes = cv2.imencode(".jpg", validate_img)[1].tostring()
         img_b64 = base64.b64encode(img_bytes)
-        result = ocr(img_b64, self.get_access_token(client_id, client_secret))
+        result = ocr(
+            img_b64,
+            self.get_access_token(os.getenv("CLIENT_ID"), os.getenv("CLIENT_SECRET")),
+        )
         logger.debug("Validation code is {}".format(result))
         return result
-
-    # def _get_validate_code(self, validate_img) -> int:
-    #     validate_img = cv2.resize(
-    #         validate_img, (self.input_width, self.input_height)
-    #     ).reshape((1, self.input_height, self.input_width, 3))
-    #     print("start get code")
-    #     time.sleep(1)
-    #     pre = self.model.predict(validate_img / 255)
-    #     validate_code = self._decode(pre)
-    #     print("successful get code")
-    #     self.validate_code = validate_code
-    #     print("validate code is {}".format(self.validate_code))
-    #     return validate_code
-
-    def _decode(self, y):
-        y = np.argmax(np.array(y), axis=2)[:, 0]
-        return "".join([str(x) for x in y])
-
-    def _save_cookies(self, cookies=None):
-        if cookies is None:
-            cookies = self.cookies
-        with open("./cookies.json", "w") as f:
-            json.dump(cookies, f)
 
     def _login(self, no, pwd_b64, validate_code):
         post_data = {
@@ -160,9 +220,6 @@ class Login(object):
         # update cookies
         self.cookies["hallticket"] = login_resp.cookies["hallticket"]
         self.cookies["username"] = login_resp.cookies["username"]
-        # save cookire
-        self._save_cookies()
-
         return self.cookies
 
     def get_cookies(self, retry=None):
@@ -185,10 +242,10 @@ class Login(object):
                 break
         else:
             logger.error("Hit maximum try")
-            raise Exception('Maximum try!')
+            raise Exception("Maximum try!")
         self.redis.hmset(self.no, {"hallticket": self.cookies["hallticket"]})
         logger.debug("Store user {} hallticket in redis".format(self.no))
-        return self.cookies
+        return self.cookies["hallticket"]
 
     def get_access_token(self, client_id, client_secret):
         base_url = "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={}&client_secret={}"
@@ -205,29 +262,21 @@ class Login(object):
             logger.debug("Hit cache, token is {}".format(token))
         return token
 
-    def test(self):
-        img = self._get_validate_img()
-        code = self._get_validate_code_ocr(img)
-        logger.info("Validation code is {}".format(code))
-        cv2.imshow("Test image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-    def show_img(self, img):
-        cv2.imshow("Test image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
 
 def test():
-    username = os.getenv("CARDNO")
+    id = os.getenv("STUDENT_ID")
     password = os.getenv("PASSWORD")
-    logger.info("CardNo is {}, password is {}".format(username, password))
-    test_login = Login(card_no=username, password=password, retry=15)
-    cookies = test_login.get_cookies()
-    print(cookies)
-    # test_login.test()
+    card_no = os.getenv("CARD_NO")
+    logger.info("Student ID is {}, password is {}".format(id, password))
+    test_quiry = CardBanlanceQuiry(id, password, card_no)
+    print(test_quiry.quiry_banlance())
+    print(test_quiry.quiry_today())
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    logging.basicConfig(level=logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
     test()

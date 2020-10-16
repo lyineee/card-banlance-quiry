@@ -1,0 +1,6 @@
+requests
+opencv-python
+python-dotenv
+RedisPy
+apscheduler
+pymongo

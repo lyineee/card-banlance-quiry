@@ -1,4 +1,0 @@
-retry
-tensorflow
-requests
-cv2
