@@ -6,3 +6,4 @@
 .venv/
 docker-compose.yml
 __pycache__/
+dump.rdb

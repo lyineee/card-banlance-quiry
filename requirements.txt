@@ -1,6 +1,5 @@
 requests
-opencv-python
 python-dotenv
-RedisPy
+redis
 apscheduler
 pymongo
