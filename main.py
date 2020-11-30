@@ -17,7 +17,10 @@ day_begin_update = {"second": "0", "minute": "0", "hour": "0"}
 
 scheduler = BlockingScheduler()
 updater = CardBalanceQuiry(
-    os.getenv("STUDENT_ID"), os.getenv("PASSWORD"), os.getenv("CARD_NO")
+    os.getenv("STUDENT_ID"),
+    os.getenv("PASSWORD"),
+    os.getenv("CARD_NO"),
+    os.getenv("XXBH"),
 )
 
 
