@@ -33,7 +33,7 @@ class CardBalanceQuiry(object):
     def date(self):
         return time.strftime("%Y-%m-%d", time.localtime())
 
-    def quiry_balance(self, retry=3):
+    def quiry_balance(self, retry: int = 3) -> float:
         cookies = self.get_cookies()
         try:
             for _ in range(retry):
@@ -63,34 +63,25 @@ class CardBalanceQuiry(object):
 
         return self.balance
 
-    def quiry_today(self, retry=3):  # Api deprecated
-        cookies = self.get_cookies()
-        today = 0
-        for _ in range(retry):
-            try:
-
-                res = rq.post(
-                    self.history_url,
-                    cookies=cookies,
-                    data={
-                        "sdate": self.date(),
-                        "edate": self.date(),
-                        "account": self.card_no,
-                    },
-                )
-                for i in res.json()["rows"]:
-                    val = i["TRANAMT"]
-                    if val < 0:
-                        today += val
-                break
-            except JSONDecodeError:
-                # raise ConnectionRefusedError
-                cookies = self.get_cookies(refresh=True)
-            except Exception as e:
-                logger.warning("quiry history error, msg: {}".format(e))
-                cookies = self.get_cookies(refresh=True)
-                # raise
-        return today
+    def quiry_today(self, reset=False) -> float:
+        '''
+        reset: Set true to set current banlance to base for calculate daily use.
+        '''
+        if reset:
+            start = self.quiry_balance()
+            self.redis.hset(self.student_id, "start", start)
+            return 0
+            
+        day_start = float(self.redis.hget(self.student_id, "start").decode())
+        if day_start:
+            current = self.quiry_balance()
+            today = day_start - current
+            if today <= 0:  # If increase
+                today = 0
+            return today
+        else:
+            logger.debug("Can not find the start balance. Will return 0")
+            return 0
 
     def get_cookies(self, refresh=False):
         if not refresh:
