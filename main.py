@@ -3,7 +3,9 @@ import os
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
+from redis import Redis
 
+from free_class import update_class
 from student_card import CardBalanceQuiry
 
 load_dotenv()
@@ -34,6 +36,7 @@ def update_start():
     Run once a day to update today's usage.
     """
     updater.quiry_today(reset=True)
+    update_class(db)
 
 
 def update_card_info():
@@ -44,6 +47,8 @@ def update_card_info():
 
 
 # First run
+db = Redis(host=os.getenv("REDIS_HOST"), port=os.getenv("REDIS_PORT"), db=0)
+update_class(db)
 update_card_info()
 logger.info("First run to get info")
 

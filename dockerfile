@@ -8,6 +8,6 @@ RUN ln -snf /usr/share/zoneinfo/$TIME_ZONE /etc/localtime && echo $TIME_ZONE > /
 COPY ["requirements.txt", "./"]
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
-COPY ["main.py", "student_card.py", "./"]
+COPY ["main.py", "student_card.py","free_class.py", "./"]
 
 CMD [ "python", "./main.py" ]
