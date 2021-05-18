@@ -3,9 +3,9 @@ import requests as rq
 import time
 import json
 import redis
+from requests.api import get
 
-# r = redis.Redis()
-# r = redis.StrictRedis()
+
 code_set_name = "classroom_code"
 
 
@@ -19,8 +19,9 @@ def get_all_class_room(redis: redis.Redis):
         for _, class_list in data["d"]["all"].items():
             for classroom in class_list:
                 redis.sadd(code_set_name, classroom["code"])
-    except json.JSONDecodeError as e:
-        raise Exception(e.msg)
+    except json.JSONDecodeError:
+        print("Response content:\n {}".format(resp.content))
+        raise
 
 
 def get_free_classroom(class_no: Union[int, str], redis: redis.Redis):
@@ -115,12 +116,15 @@ def update_class(db: redis.Redis):
 
 
 if __name__ == "__main__":
-    # data = dict()
-    # for location, codes in get_classify_data(r).items():
-    #     free_list = []
-    #     for code in codes:
-    #         free_list.append(get_free_count(code))
-    #     data[location] = free_list
-    # print(data)
-    # update_class(r)
+    r = redis.Redis()
+    r = redis.StrictRedis()
+    get_all_class_room(r)
+    data = dict()
+    for location, codes in get_classify_data(r).items():
+        free_list = []
+        for code in codes:
+            free_list.append(get_free_count(code))
+        data[location] = free_list
+    print(data)
+    update_class(r)
     pass
