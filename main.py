@@ -15,6 +15,7 @@ logger.setLevel(os.getenv("LOG_LEVEL", logging.DEBUG))
 
 default_update_cron = {"second": "*", "minute": "*/20", "hour": "*"}
 day_begin_update = {"second": "0", "minute": "0", "hour": "0"}
+day_after_update = {"second": "0", "minute": "0", "hour": "5"}
 
 scheduler = BlockingScheduler()
 updater = CardBalanceQuiry(
@@ -36,6 +37,9 @@ def update_start():
     Run once a day to update today's usage.
     """
     updater.quiry_today(reset=True)
+
+
+def update_morning():
     update_class(db)
 
 
@@ -56,5 +60,6 @@ scheduler.add_job(
     update_card_info, trigger="cron", id="info_updater", **default_update_cron
 )
 scheduler.add_job(update_start, trigger="cron", **day_begin_update)
+scheduler.add_job(update_morning, trigger="cron", **day_after_update)
 scheduler.add_job(update_job, trigger="cron", minute="*/5")
 scheduler.start()
